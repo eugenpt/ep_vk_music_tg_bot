@@ -1,0 +1,4 @@
+telegram
+vk_api
+logging
+requests
