@@ -20,10 +20,13 @@ from auths import *
 
 # %%
 
-vk_session = vk_api.VkApi(login=AUTHS[0], password=AUTHS[1])
-vk_session.auth()
-vk = vk_session.get_api()  # Теперь можно обращаться к методам API как к обычным 
-vk_audio = audio.VkAudio(vk_session)  # Получаем доступ к audio
+vk_session = None
+vk_audio = None
+
+# vk_session = vk_api.VkApi(login=AUTHS[0], password=AUTHS[1])
+# vk_session.auth()
+# vk = vk_session.get_api()  # Теперь можно обращаться к методам API как к обычным 
+# vk_audio = audio.VkAudio(vk_session)  # Получаем доступ к audio
 
 # %%
 

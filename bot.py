@@ -26,8 +26,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CONTEXT = None
-UPDATE = None
+
+global DEBUG
+DEBUG = {}
+
 
 def shuffle_str(s):
     import random
@@ -35,27 +37,16 @@ def shuffle_str(s):
     random.shuffle(x)
     return ''.join(x)
 
+
 def start(update: Update, context: CallbackContext) -> None:
     update.message.reply_text('Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти')
-    return
-    keyboard = [
-        [
-            InlineKeyboardButton("Option 1", callback_data='1'),
-            InlineKeyboardButton("Option 2", callback_data='2'),
-        ],
-        [InlineKeyboardButton("Option 3", callback_data='3')],
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    update.message.reply_text('Please choose:', reply_markup=reply_markup)
 
 
 def button(update: Update, context: CallbackContext) -> None:
-    global UPDATE
-    UPDATE = update
-    global CONTEXT 
-    CONTEXT = context
+    global DEBUG
+    DEBUG['context'] = context
+    DEBUG['update'] = update
+
     query = update.callback_query
 
     # CallbackQueries need to be answered, even if no notification to the user is needed
@@ -64,42 +55,56 @@ def button(update: Update, context: CallbackContext) -> None:
     
     ids = query.data
     
-    # r = ep_vk_audio_by_ids(ids)
-    global SAVED
-    
-    if(ids not in SAVED):
-        print(SAVED)
-        print(ids)
-        logging.getLogger().info('%s not in SAVED!' % ids)
-        r = ep_vk_audio_by_ids(ids)
-        SAVED[ids] = r
-        # raise ValueError('WTF!???!')
-    
-    r = SAVED[ids]
-    
-    #query.message.reply_text(f"Selected option: {query.data}")
-    # query.message.reply_text(json.dumps(r))
-    # query.edit_message_text(text=f"Selected option: {query.data}")
-
-    logging.getLogger().info('Getting %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
-
-
-    R = requests.get(r['url'])
-
-    if r['track_covers']:
-        thumb = requests.get(r['track_covers'][0]).content
+    if(ids[0]=='{'):
+        # page stuff!
+        logging.getLogger().debug('json? %s' % ids)
+        r = json.loads(ids)
+        logging.getLogger().debug('json! %s' % json.dumps(r))
+        
+        logging.getLogger().info('looking at page %i for %s'
+                                 % (r['page'],r['q']))
+        
+        page_search(r['q'], query.message, page=int(r['page']), edit=True)
     else:
-        thumb = None
+        # r = ep_vk_audio_by_ids(ids)
+        global SAVED
+        
+        if(ids not in SAVED):
+            logging.getLogger().info('%s not in SAVED! getting from vk..' % ids)
+            r = ep_vk_audio_by_ids(ids)
+            SAVED[ids] = r
+        
+        r = SAVED[ids]
+        
+        msg = query.message.reply_text("думаю..")
+        DEBUG['msg'] = msg
+        
+        logging.getLogger().info('Getting %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
     
-    query.message.reply_audio(
-        R.content,
-        duration=r['duration'],
-        title=r['title'],
-        performer=r['artist'],
-        thumb=thumb
-        )
-    logging.getLogger().info('Got %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
-
+        try:
+            R = requests.get(r['url'])
+        
+            if r['track_covers']:
+                thumb = requests.get(r['track_covers'][0]).content
+            else:
+                thumb = None
+            
+            # msg.edit_media(InputMediaAudio(
+            query.message.reply_audio(
+                R.content,
+                duration=r['duration'],
+                title=r['title'],
+                performer=r['artist'],
+                thumb=thumb
+                )
+            msg.delete()
+            # InputMediaAudio()
+            
+            logging.getLogger().info('Got %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
+        except Exception as e:
+            msg.edit_text('Error! %s' % str(e))
+            pass
+        
 
 def help_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text("Use /start to test this bot.")
@@ -122,7 +127,6 @@ def time_str(dur):
 def prepare_keyboard(q, R, page):
     global SAVED
     
-    # return [[InlineKeyboardButton('a', callback_data='a')]]
     keyboard = [
             [InlineKeyboardButton(
                 r['artist']+' - '+r['title']+'  '+time_str(r['duration']),
@@ -131,40 +135,49 @@ def prepare_keyboard(q, R, page):
             for j,r in enumerate(R)
         ]
     
-    # if(page==0):
-    #     if(len(R)<10):
-    #         pass
-    #     else:
-    #         keyboard.append([InlineKeyboardButton(">", callback_data=json.dumps({'q':q,'page':page+1}))])
-    # else:
-    #     if(len(R)<10):
-    #         keyboard.append([InlineKeyboardButton("<", callback_data=json.dumps({'q':q,'page':page-1}))])
-    #     else:
-    #         keyboard.append([
-    #                 InlineKeyboardButton("<", callback_data=json.dumps({'q':q,'page':page-1})),
-    #                 InlineKeyboardButton(">", callback_data=json.dumps({'q':q,'page':page+1}))
-    #             ])    
+    # page movers
+    if(page==0):
+        if(len(R)<10):
+            pass
+        else:
+            keyboard.append([InlineKeyboardButton(">", callback_data=json.dumps({'q':q,'page':page+1}))])
+    else:
+        if(len(R)<10):
+            keyboard.append([InlineKeyboardButton("<", callback_data=json.dumps({'q':q,'page':page-1}))])
+        else:
+            keyboard.append([
+                    InlineKeyboardButton("<", callback_data=json.dumps({'q':q,'page':page-1})),
+                    InlineKeyboardButton(">", callback_data=json.dumps({'q':q,'page':page+1}))
+                ])    
     return keyboard
 
+
+
 def message(update: Update, context: CallbackContext) -> None:
-    s = update.message.text
+    page_search(update.message.text, update.message)
+
+def page_search(s, message, page=0, edit=False):
     logging.getLogger().info('Looking for ' + s)
     
-    R = ep_vk_search(s, n_results_per_page=n_results_per_page)
+    R = ep_vk_search(s, n_results_per_page=n_results_per_page, page=page)
     logging.getLogger().info('Found : %i results' % len(R))
     
     if len(R)==0:
         logging.getLogger().info('nothing..')
-        update.message.reply_text('Ничего не нашлось..')
+        message.reply_text('Ничего не нашлось..')
     else:
         global SAVED
         for r in R:
             r['callback_data'] = str(r['owner_id'])+'|'+str(r['id'])
             SAVED[r['callback_data']] = {k:r[k] for k in r}
        
-        keyboard = prepare_keyboard(s, R, 0)
+        keyboard = prepare_keyboard(s, R, page)
         reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text('Вот что нашёл:', reply_markup=reply_markup)
+        if edit:
+            message.edit_reply_markup(reply_markup)
+        else:
+            message.reply_text('Вот что нашёл:', reply_markup=reply_markup)
+            
 
 def main():
     # Create the Updater and pass it your bot's token.
