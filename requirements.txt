@@ -1,4 +1,4 @@
-telegram
-vk_api
-logging
 requests
+BeautifulSoup4
+python-telegram-bot
+vk_api

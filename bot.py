@@ -13,7 +13,7 @@ import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
 
-from vk_funcs import ep_vk_search, ep_vk_audio_by_ids
+from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish
 
 from auths import *
 
@@ -181,6 +181,8 @@ def main():
     # Run the bot until the user presses Ctrl-C or the process receives SIGINT,
     # SIGTERM or SIGABRT
     updater.idle()
+    
+    ep_vk_finish()
 
 
 if __name__ == '__main__':
