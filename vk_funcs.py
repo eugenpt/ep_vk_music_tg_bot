@@ -31,6 +31,13 @@ vk_audio = None
 # %%
 
 
+vk_audio_id_sep = '|'
+vk_audio_id_sep = '='
+def vk_audio_id_encode(a,b):
+    return str(a) + vk_audio_id_sep + str(b)
+
+def vk_audio_id_decode(x):
+    return x.split(vk_audio_id_sep)
 
 
 def ep_vk_search(q, n_results_per_page=10, page=0):
@@ -40,7 +47,7 @@ def ep_vk_search(q, n_results_per_page=10, page=0):
 
 def ep_vk_audio_by_ids(ids):
     global vk_audio
-    owner_id,audio_id=[int(js) for js in ids.split('|')]
+    owner_id,audio_id=[int(js) for js in vk_audio_id_decode(ids)]
     return vk_audio.get_audio_by_id(owner_id, audio_id)
 
 

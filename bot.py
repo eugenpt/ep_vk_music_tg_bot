@@ -13,11 +13,12 @@ import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
 
-from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish
+from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, vk_audio_id_encode
 
 from auths import *
 
 n_results_per_page = 10
+n_results_per_page = 6
 
 SAVED  = {}
 
@@ -57,9 +58,13 @@ def button(update: Update, context: CallbackContext) -> None:
     
     if(ids[0]=='{'):
         # page stuff!
-        logging.getLogger().debug('json? %s' % ids)
-        r = json.loads(ids)
-        logging.getLogger().debug('json! %s' % json.dumps(r))
+        # logging.getLogger().debug('json? %s' % ids)
+        # r = json.loads(ids)
+        # logging.getLogger().debug('json! %s' % json.dumps(r))
+        
+        ts = ids[1:].split('|')
+        
+        r = {'q':ts[0], 'page':int(ts[1])}
         
         logging.getLogger().info('looking at page %i for %s'
                                  % (r['page'],r['q']))
@@ -137,17 +142,17 @@ def prepare_keyboard(q, R, page):
     
     # page movers
     if(page==0):
-        if(len(R)<10):
+        if(len(R) < n_results_per_page):
             pass
         else:
-            keyboard.append([InlineKeyboardButton(">", callback_data=json.dumps({'q':q,'page':page+1}))])
+            keyboard.append([InlineKeyboardButton(">", callback_data='{'+q+'|'+str(page+1))])#json.dumps({'q':q,'page':page+1}))])
     else:
-        if(len(R)<10):
-            keyboard.append([InlineKeyboardButton("<", callback_data=json.dumps({'q':q,'page':page-1}))])
+        if(len(R) < n_results_per_page):
+            keyboard.append([InlineKeyboardButton("<", callback_data='{'+q+'|'+str(page-1))])#json.dumps({'q':q,'page':page-1}))])
         else:
             keyboard.append([
-                    InlineKeyboardButton("<", callback_data=json.dumps({'q':q,'page':page-1})),
-                    InlineKeyboardButton(">", callback_data=json.dumps({'q':q,'page':page+1}))
+                    InlineKeyboardButton("<", callback_data='{'+q+'|'+str(page-1)),#json.dumps({'q':q,'page':page-1})),
+                    InlineKeyboardButton(">", callback_data='{'+q+'|'+str(page+1))#json.dumps({'q':q,'page':page+1}))
                 ])    
     return keyboard
 
@@ -168,7 +173,7 @@ def page_search(s, message, page=0, edit=False):
     else:
         global SAVED
         for r in R:
-            r['callback_data'] = str(r['owner_id'])+'|'+str(r['id'])
+            r['callback_data'] = vk_audio_id_encode(r['owner_id'],str(r['id']))
             SAVED[r['callback_data']] = {k:r[k] for k in r}
        
         keyboard = prepare_keyboard(s, R, page)
