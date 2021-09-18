@@ -2,4 +2,6 @@ __auths*.txt
 vk_config.v2.json
 __pycache__/*
 nssm__stdout.txt
+*.bat
+
 

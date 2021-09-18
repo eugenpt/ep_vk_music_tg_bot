@@ -9,13 +9,17 @@ Basic example for a bot that uses inline keyboards.
 import json
 import logging
 import requests
+import socket
+import traceback
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
 
-from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, vk_audio_id_encode
+from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, vk_audio_id_encode, download_audio
 
 from auths import *
+
+socket._GLOBAL_DEFAULT_TIMEOUT = 100
 
 n_results_per_page = 10
 n_results_per_page = 6
@@ -38,10 +42,37 @@ def shuffle_str(s):
     random.shuffle(x)
     return ''.join(x)
 
+def log(*args):
+    logger.info(*args)
+
+def info(*args):
+    logger.info(*args)
+
+def debug(*args):
+    logger.debug(*args)
+
+def warning(*args):
+    logger.warning(*args)
+
 
 def start(update: Update, context: CallbackContext) -> None:
     update.message.reply_text('Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти')
 
+MAX_MESSAGE_LEN = 500
+def send_exc(message, s, print_also=True):
+    if print_also:
+        print(s)
+
+    try:
+        message.reply_text(s[:MAX_MESSAGE_LEN])
+        if len(s)>MAX_MESSAGE_LEN:
+            send_exc(message,s[MAX_MESSAGE_LEN:], print_also=False)
+    except:
+        traceback.print_exc()
+
+def msg_add_text(msg, s):
+    msg.text = msg.text + s
+    msg.edit_text(msg.text)
 
 def button(update: Update, context: CallbackContext) -> None:
     global DEBUG
@@ -58,15 +89,15 @@ def button(update: Update, context: CallbackContext) -> None:
     
     if(ids[0]=='{'):
         # page stuff!
-        # logging.getLogger().debug('json? %s' % ids)
+        # debug('json? %s' % ids)
         # r = json.loads(ids)
-        # logging.getLogger().debug('json! %s' % json.dumps(r))
+        # debug('json! %s' % json.dumps(r))
         
         ts = ids[1:].split('|')
         
         r = {'q':ts[0], 'page':int(ts[1])}
         
-        logging.getLogger().info('looking at page %i for %s'
+        info('looking at page %i for %s'
                                  % (r['page'],r['q']))
         
         page_search(r['q'], query.message, page=int(r['page']), edit=True)
@@ -75,7 +106,7 @@ def button(update: Update, context: CallbackContext) -> None:
         global SAVED
         
         if(ids not in SAVED):
-            logging.getLogger().info('%s not in SAVED! getting from vk..' % ids)
+            info('%s not in SAVED! getting from vk..' % ids)
             r = ep_vk_audio_by_ids(ids)
             SAVED[ids] = r
         
@@ -84,30 +115,70 @@ def button(update: Update, context: CallbackContext) -> None:
         msg = query.message.reply_text("думаю..")
         DEBUG['msg'] = msg
         
-        logging.getLogger().info('Getting %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
+        info('Getting %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
+        
+        print(r)
     
         try:
-            R = requests.get(r['url'])
+            msg_add_text(msg, 'скачиваю аудио..')
+            
+            content = download_audio(r['url'])
+
+            log('audio downloaded, ~%.1f MB' % (len(content)/(1024*1024)))
         
+            thumb = None
             if r['track_covers']:
-                thumb = requests.get(r['track_covers'][0]).content
+                msg_add_text(msg, 'обложки..')
+                log('loading cover..')
+                
+                exc_str = None
+                for track_url in r['track_covers']:
+                    try:
+                        thumb = requests.get(track_url, timeout=10).content
+                        log('ok')
+                        msg_add_text(msg, 'ок..')
+                        break
+                    except:
+                        exc_str = traceback.format_exc()
+                        pass
+                        # send_exc(query.message, traceback.format_exc())
+                if thumb is None:
+                    log('could not load cover')
+                    msg_add_text(msg, 'ошибка..')
+                    log(exc_str)
+                    send_exc(query.message, exc_str)
             else:
                 thumb = None
             
+            msg_add_text(msg, 'отправляю..')
             # msg.edit_media(InputMediaAudio(
             query.message.reply_audio(
-                R.content,
+                content,
                 duration=r['duration'],
                 title=r['title'],
                 performer=r['artist'],
-                thumb=thumb
+                thumb=thumb,
                 )
             msg.delete()
             # InputMediaAudio()
             
-            logging.getLogger().info('Got %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
+            info('Got %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
         except Exception as e:
-            msg.edit_text('Error! %s' % str(e))
+            warning(str(r))
+            warning(traceback.format_exc())
+            # send_exc(query.message, traceback.format_exc())
+
+            try:
+                query.message.reply_audio(
+                        r['url'],
+                        title=r['title'],
+                        performer=r['artist'],
+                    )
+            except:
+                traceback.print_exc()
+                pass
+        
+
             pass
         
 
@@ -162,13 +233,13 @@ def message(update: Update, context: CallbackContext) -> None:
     page_search(update.message.text, update.message)
 
 def page_search(s, message, page=0, edit=False):
-    logging.getLogger().info('Looking for ' + s)
+    info('Looking for ' + s)
     
     R = ep_vk_search(s, n_results_per_page=n_results_per_page, page=page)
-    logging.getLogger().info('Found : %i results' % len(R))
+    info('Found : %i results' % len(R))
     
     if len(R)==0:
-        logging.getLogger().info('nothing..')
+        info('nothing..')
         message.reply_text('Ничего не нашлось..')
     else:
         global SAVED
