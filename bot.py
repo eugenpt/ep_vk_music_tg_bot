@@ -1,11 +1,4 @@
 #!/usr/bin/env python
-# pylint: disable=W0613, C0116
-# type: ignore[union-attr]
-# This program is dedicated to the public domain under the CC0 license.
-
-"""
-Basic example for a bot that uses inline keyboards.
-"""
 import json
 import logging
 import requests
@@ -15,7 +8,7 @@ import traceback
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
 
-from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, vk_audio_id_encode, download_audio
+from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover
 
 from auths import *
 
@@ -71,6 +64,7 @@ def send_exc(message, s, print_also=True):
         traceback.print_exc()
 
 def msg_add_text(msg, s):
+    log(s)
     msg.text = msg.text + s
     msg.edit_text(msg.text)
 
@@ -85,13 +79,14 @@ def button(update: Update, context: CallbackContext) -> None:
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
     query.answer()
     
+    msg = query.message.reply_text("думаю..")
+    
+    log_fun = lambda s: msg_add_text(msg,s)
+    
     ids = query.data
     
     if(ids[0]=='{'):
         # page stuff!
-        # debug('json? %s' % ids)
-        # r = json.loads(ids)
-        # debug('json! %s' % json.dumps(r))
         
         ts = ids[1:].split('|')
         
@@ -100,58 +95,39 @@ def button(update: Update, context: CallbackContext) -> None:
         info('looking at page %i for %s'
                                  % (r['page'],r['q']))
         
+        log_fun('ищу..')
+
         page_search(r['q'], query.message, page=int(r['page']), edit=True)
+        
+        msg.delete()
     else:
-        # r = ep_vk_audio_by_ids(ids)
         global SAVED
         
         if(ids not in SAVED):
             info('%s not in SAVED! getting from vk..' % ids)
+            msg_add_text(msg, 'смотрю данные..')
             r = ep_vk_audio_by_ids(ids)
             SAVED[ids] = r
         
         r = SAVED[ids]
         
-        msg = query.message.reply_text("думаю..")
         DEBUG['msg'] = msg
         
-        info('Getting %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
+        info('Getting %s : %s' % (ids, r['title_str']))
         
         print(r)
     
         try:
-            msg_add_text(msg, 'скачиваю аудио..')
-            
-            content = download_audio(r['url'])
-
-            log('audio downloaded, ~%.1f MB' % (len(content)/(1024*1024)))
+            content = download_audio(r['url'], log_fun)
         
             thumb = None
             if r['track_covers']:
-                msg_add_text(msg, 'обложки..')
-                log('loading cover..')
-                
-                exc_str = None
-                for track_url in r['track_covers']:
-                    try:
-                        thumb = requests.get(track_url, timeout=10).content
-                        log('ok')
-                        msg_add_text(msg, 'ок..')
-                        break
-                    except:
-                        exc_str = traceback.format_exc()
-                        pass
-                        # send_exc(query.message, traceback.format_exc())
-                if thumb is None:
-                    log('could not load cover')
-                    msg_add_text(msg, 'ошибка..')
-                    log(exc_str)
-                    send_exc(query.message, exc_str)
+                thumb = download_cover(r['track_covers'], log_fun)
             else:
                 thumb = None
             
-            msg_add_text(msg, 'отправляю..')
-            # msg.edit_media(InputMediaAudio(
+            log_fun('отправляю..')
+
             query.message.reply_audio(
                 content,
                 duration=r['duration'],
@@ -159,11 +135,12 @@ def button(update: Update, context: CallbackContext) -> None:
                 performer=r['artist'],
                 thumb=thumb,
                 )
-            msg.delete()
-            # InputMediaAudio()
             
-            info('Got %s : %s' % (ids, r['artist']+' - '+r['title']+'  '+time_str(r['duration'])))
+            info('Got %s : %s' % (ids, r['title_str']))
+
+            msg.delete()
         except Exception as e:
+            log_fun('ошибка')
             warning(str(r))
             warning(traceback.format_exc())
             # send_exc(query.message, traceback.format_exc())
@@ -176,55 +153,39 @@ def button(update: Update, context: CallbackContext) -> None:
                     )
             except:
                 traceback.print_exc()
-                pass
-        
-
-            pass
-        
 
 def help_command(update: Update, context: CallbackContext) -> None:
     update.message.reply_text("Use /start to test this bot.")
 
-def time_str(dur):
-    rs = ''
-    was = 0
-    for d in [3600,60,1]:
-        if was:
-            rs = rs+':%02i' % int(dur/d)
-        else:
-            if dur > d:
-                rs = rs + '%i' % int(dur/d)
-            
-                was = 1
-        dur = dur % d
-            
-    return rs
+def page_button(q, page, delta_n):
+    return InlineKeyboardButton(
+        "<" if delta_n < 0 else ">", 
+        callback_data='{'+q+'|'+str(page + delta_n) # json.dumps({'q':q,'page':page+1})
+    )
 
 def prepare_keyboard(q, R, page):
     global SAVED
     
     keyboard = [
             [InlineKeyboardButton(
-                r['artist']+' - '+r['title']+'  '+time_str(r['duration']),
+                r['title_str'],
                 callback_data=r['callback_data']
             )]
             for j,r in enumerate(R)
         ]
     
-    # page movers
-    if(page==0):
-        if(len(R) < n_results_per_page):
-            pass
-        else:
-            keyboard.append([InlineKeyboardButton(">", callback_data='{'+q+'|'+str(page+1))])#json.dumps({'q':q,'page':page+1}))])
-    else:
-        if(len(R) < n_results_per_page):
-            keyboard.append([InlineKeyboardButton("<", callback_data='{'+q+'|'+str(page-1))])#json.dumps({'q':q,'page':page-1}))])
-        else:
-            keyboard.append([
-                    InlineKeyboardButton("<", callback_data='{'+q+'|'+str(page-1)),#json.dumps({'q':q,'page':page-1})),
-                    InlineKeyboardButton(">", callback_data='{'+q+'|'+str(page+1))#json.dumps({'q':q,'page':page+1}))
-                ])    
+    prev_page_btn = page_button(q, page, -1)
+    next_page_btn = page_button(q, page, 1)
+    
+    page_btns = []
+    if page > 0:
+        page_btns.append(prev_page_btn)
+    if len(R) >= n_results_per_page:
+        page_btns.append(next_page_btn)
+    
+    if len(page_btns)>0:
+        keyboard.append(page_btns)
+    
     return keyboard
 
 
@@ -244,7 +205,6 @@ def page_search(s, message, page=0, edit=False):
     else:
         global SAVED
         for r in R:
-            r['callback_data'] = vk_audio_id_encode(r['owner_id'],str(r['id']))
             SAVED[r['callback_data']] = {k:r[k] for k in r}
        
         keyboard = prepare_keyboard(s, R, page)
