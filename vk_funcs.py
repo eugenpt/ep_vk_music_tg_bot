@@ -16,6 +16,7 @@ import requests
 import vk_api
 
 from Crypto.Cipher import AES
+from functools import lru_cache
 from threading import Thread, Event
 from time import sleep, time
 from vk_api import audio
@@ -53,6 +54,8 @@ def vk_audio_id_encode(a,b):
 def vk_audio_id_decode(x):
     return x.split(vk_audio_id_sep)
 
+ep_vk_audio_by_ids__saved = {}
+
 def prep_audio(r):
     if r['duration']:
         r['duration_str'] = time_str(r['duration'])
@@ -64,6 +67,9 @@ def prep_audio(r):
 
     r['callback_data'] = vk_audio_id_encode(r['owner_id'],str(r['id']))
 
+    global ep_vk_audio_by_ids__saved
+    ep_vk_audio_by_ids__saved[r['callback_data']] = r
+    
     return r
 
 def ep_vk_search(q, n_results_per_page=10, page=0):
@@ -71,6 +77,12 @@ def ep_vk_search(q, n_results_per_page=10, page=0):
     return [prep_audio(a) for a in vk_audio.search(q, n_results_per_page, page*n_results_per_page)]  
 
 def ep_vk_audio_by_ids(ids):
+    if ids in ep_vk_audio_by_ids__saved:
+        return ep_vk_audio_by_ids__saved[ids]
+    else:
+        return ep_vk_audio_by_ids__request(ids)
+
+def ep_vk_audio_by_ids__request(ids):
     global vk_audio
     owner_id,audio_id=[int(js) for js in vk_audio_id_decode(ids)]
     return prep_audio(vk_audio.get_audio_by_id(owner_id, audio_id))
