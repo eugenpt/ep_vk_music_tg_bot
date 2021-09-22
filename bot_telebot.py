@@ -8,11 +8,14 @@ Created on %(date)s
 
 #%%% imports
 
+import asyncio
 import logging
 import telebot
+import tempfile
 import traceback
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from shazamio import Shazam
 
 from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover
 from auths import AUTHS
@@ -24,7 +27,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DEBUG = {}
+DEBUG = {'msgs':[]}
 
 # %%
 
@@ -47,8 +50,88 @@ def on_start(message):
         'Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти'
     )
 
+
+async def shazam_recognize_async(path):
+    shazam = Shazam()
+    return await shazam.recognize_song(path)
+
+def de_async(fun, *args, **kwargs):
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    if loop.is_running():
+        return asyncio.gather(
+            fun(*args, **kwargs)
+        ).result()
+    else:
+        return loop.run_until_complete(
+            fun(*args, **kwargs)
+        )
+
+def shazam_recognize(data_or_path):
+    if type(data_or_path)==bytes:
+        tfile = tempfile.NamedTemporaryFile()
+        tfile.write(data_or_path)
+        data_or_path = tfile.name
+    return de_async(shazam_recognize_async, data_or_path)
+
+
+       
+
+# Handles all sent documents and audio files
+@bot.message_handler(content_types=['voice', 'audio'])
+def handle_docs_audio(message):
+    print(message)
+    DEBUG['msgs'].append(message)
+    
+    file_id = (message.voice if message.voice is not None else message.audio).file_id
+    
+    print('getting file..')
+    file = bot.get_file(file_id).wait()
+    
+    print('downloading file..')
+    content = bot.download_file(file.file_path).wait()
+    
+    DEBUG['content'] = content
+    
+    print('recognizing file..')
+    rec = shazam_recognize(content)
+    
+    print(rec)
+    DEBUG['rec'] = rec
+    
+    if len(rec['matches'])==0:
+        print('getting file..')
+        bot.reply_to(message, 'Nothing found, sorry..')     
    
-@bot.message_handler(func=lambda message: True)
+    else:
+        page_search(rec['track']['title']+' - '+rec['track']['subtitle'], message)
+        return 
+        keyboard = []
+        # for m in rec['matches']:
+        m=rec
+        if 1:
+            title_str = m['track']['title']+' - '+m['track']['subtitle']
+            print(title_str)
+            keyboard.append(InlineKeyboardButton(
+                   title_str,
+                   callback_data="#"+title_str
+            ))
+        print('simple reply..')
+        bot.reply_to(message, title_str)
+        print('complex reply..')
+        bot.reply_to(
+             message, 
+             "Нашёл:", 
+             reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+    
+   
+   
+# @bot.message_handler(func=lambda message: True)
+@bot.message_handler(content_types=['text'])
 def message_handler(message):
     page_search(message.text, message)
 
@@ -172,6 +255,8 @@ def callback_query(query):
                                  % (r['page'],r['q']))
 
         page_search(r['q'], query.message, page=int(r['page']), edit=True)
+    elif query.data[0]=='#':
+        page_search(query.data[1:], query.message)
     else:
         ids = query.data
         
