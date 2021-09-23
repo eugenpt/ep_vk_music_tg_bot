@@ -12,7 +12,7 @@ import logging
 import telebot
 import traceback
 
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaAudio
 
 from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover
 from auths import AUTHS
@@ -144,7 +144,7 @@ def init_log_msg(chat_id):
 def log_msg(s):
     logger.info(s)
     global _log_msg
-    if Options.send_log_messages and _log_msg is not None:
+    if Options.send_log_messages and (_log_msg is not None):
         _log_msg.text = _log_msg.text + s
         bot.edit_message_text(
             _log_msg.text, 
@@ -154,7 +154,7 @@ def log_msg(s):
 
 def delete_log_msg():
     global _log_msg
-    if Options.send_log_messages and _log_msg is not None:
+    if Options.send_log_messages and (_log_msg is not None):
         bot.delete_message(chat_id=_log_msg.chat.id, message_id=_log_msg.id)
     _log_msg = None
 
@@ -181,10 +181,18 @@ def callback_query(query):
         # bot.answer_callback_query(query.id, "думаю..")
 
         r = ep_vk_audio_by_ids(ids)
+        print(r)
 
         logger.info('Getting %s : %s' % (ids, r['title_str']))
     
+        # first_msg = bot.send_audio(chat_id,
+        #                 r['url'],
+        #                 title=r['title'],
+        #                 performer=r['artist'],
+        #             )    
         try:
+            bot.send_chat_action(chat_id, "record_voice")
+            
             content = download_audio(r['url'], log_msg)
         
             thumb = None
@@ -193,8 +201,11 @@ def callback_query(query):
             else:
                 thumb = None
             
-            bot.answer_callback_query(query.id, "отправляю..")
+            # bot.answer_callback_query(query.id, "отправляю..")
             log_msg('отправляю..')
+            
+            # first_msg = first_msg.wait()
+            bot.send_chat_action(chat_id, "upload_document")
 
             bot.send_audio(chat_id,
                 content,
@@ -204,6 +215,19 @@ def callback_query(query):
                 thumb=thumb,
             )
             
+            # # -- doesnt work =(
+            # bot.edit_message_media(
+            #     InputMediaAudio(
+            #         content,
+            #         duration=r['duration'],
+            #         title=r['title'],
+            #         performer=r['artist'],
+            #         thumb=thumb,
+            #     ),
+            #     chat_id=chat_id,
+            #     message_id=first_msg.id,
+            # )
+
             logger.info('Got %s : %s' % (ids, r['title_str']))
 
             delete_log_msg()
