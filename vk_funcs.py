@@ -160,8 +160,6 @@ def decrypt_m3u8_part_content(part, content):
         return content
     else:
         iv = binascii.a2b_hex('%032x' % part['j'])
-        print(part['key'])
-        print(len(content))
         DEBUG['part'] = part
         DEBUG['part']['content_pre'] = content
         return AES.new(

@@ -15,13 +15,12 @@ import telebot
 import tempfile
 import traceback
 
-from pydub import AudioSegment
 from time import sleep
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from shazamio import Shazam
 
 from common import de_async
 from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover, renew_connection
+from shazam_funcs import shazam_recognize
 from auths import AUTHS
 
 # %%
@@ -133,32 +132,6 @@ def callback_query(query):
         chat_id = query.message.chat.id
         
         handle_vk_audio_by_ids(chat_id, ids)
-
-# %% Shazam
-
-def shazam_recognize(data):
-    return de_async(shazam_recognize_async, data)
-
-
-async def shazam_recognize_async(data):
-    shazam = Shazam()
-
-    return await shazam.recognize_song_from_bytes(data)
-
-# for some reason, shazam doesnt have recognize_from_bytes_data
-async def recognize_from_bytes_data(self, data):
-    audio = AudioSegment.from_file(io.BytesIO(data))
-    audio = audio.set_sample_width(2)
-    audio = audio.set_frame_rate(16000)
-    audio = audio.set_channels(1)
-
-    signature_generator = self.create_signature_generator(audio)
-    signature = signature_generator.get_next_signature()
-    while not signature:
-        signature = signature_generator.get_next_signature()
-
-    return await self.send_recognize_request(signature)
-Shazam.recognize_song_from_bytes = recognize_from_bytes_data
 
 # %% Pages
       

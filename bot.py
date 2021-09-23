@@ -5,10 +5,12 @@ import requests
 import socket
 import traceback
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile, File
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
+from telegram.ext.filters import Filters
 
 from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover, renew_connection
+from shazam_funcs import shazam_recognize
 
 from auths import AUTHS
 
@@ -16,6 +18,8 @@ socket._GLOBAL_DEFAULT_TIMEOUT = 100
 
 n_results_per_page = 10
 n_results_per_page = 6
+
+updater = None
 
 SAVED  = {}
 
@@ -26,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 global DEBUG
-DEBUG = {}
+DEBUG = {'msgs':[]}
 
 def log(*args):
     logger.info(*args)
@@ -193,7 +197,30 @@ def prepare_keyboard(q, R, page):
     
     return keyboard
 
+def audio_or_voice(update: Update, context: CallbackContext) -> None:
+    
+    print(update.message)
 
+    DEBUG['msgs'].append(update.message)    
+    
+    file_data = update.message.audio or update.message.voice
+    file = update.message.bot.get_file(file_data.file_id)
+    
+    content = file.download_as_bytearray()
+    print('recognizing file..')
+    rec = shazam_recognize(content)
+    
+    print(rec)
+    DEBUG['rec'] = rec
+    
+    if len(rec['matches'])==0:
+        update.message.reply_text('Nothing found, sorry..')     
+   
+    else:
+        page_search(
+            rec['track']['title']+' - '+rec['track']['subtitle'],
+            update.message
+        )
 
 def message(update: Update, context: CallbackContext) -> None:
     page_search(update.message.text, update.message)
@@ -218,15 +245,18 @@ def page_search(s, message, page=0, edit=False):
             message.edit_reply_markup(reply_markup)
         else:
             message.reply_text('Вот что нашёл:', reply_markup=reply_markup)
+
             
 
 def main():
+    global updater
     # Create the Updater and pass it your bot's token.
     updater = Updater(AUTHS[2])
 
     updater.dispatcher.add_handler(CommandHandler('start', start))
     updater.dispatcher.add_handler(CommandHandler('renew', renew))
     updater.dispatcher.add_handler(MessageHandler(Filters.text, message))
+    updater.dispatcher.add_handler(MessageHandler(Filters.audio | Filters.voice, audio_or_voice))
     updater.dispatcher.add_handler(CallbackQueryHandler(button))
     updater.dispatcher.add_handler(CommandHandler('help', help_command))
 
