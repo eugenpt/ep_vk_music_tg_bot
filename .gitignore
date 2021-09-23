@@ -4,4 +4,4 @@ __pycache__/*
 nssm__stdout.txt
 *.bat
 nssm*
-
+.venv*

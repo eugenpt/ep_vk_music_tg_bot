@@ -9,11 +9,13 @@ Created on %(date)s
 #%%% imports
 
 import asyncio
+import io
 import logging
 import telebot
 import tempfile
 import traceback
 
+from pydub import AudioSegment
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from shazamio import Shazam
 
@@ -46,14 +48,75 @@ bot = telebot.AsyncTeleBot(AUTHS[2])
 @bot.message_handler(commands=['start'])
 def on_start(message):
     bot.send_message(
-        message.chat.id, 
+        message.chat.id, (
         'Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти'
+        ' или записывай аудио-сообщение, распознаю'
+        '\n'
+        'Hi! send text to search audios or record to recognize'
+        )
     )
 
 
-async def shazam_recognize_async(path):
-    shazam = Shazam()
-    return await shazam.recognize_song(path)
+# Handles all sent documents and audio files
+@bot.message_handler(content_types=['voice', 'audio'])
+def handle_docs_audio(message):
+    print(message)
+    DEBUG['msgs'].append(message)
+    
+    file_id = (message.voice if message.voice is not None else message.audio).file_id
+    
+    print('getting file..')
+    file = bot.get_file(file_id).wait()
+    
+    print('downloading file..')
+    content = bot.download_file(file.file_path).wait()
+    
+    print('recognizing file..')
+    rec = shazam_recognize(content)
+    
+    print(rec)
+    DEBUG['rec'] = rec
+    
+    if len(rec['matches'])==0:
+        bot.reply_to(message, 'Nothing found, sorry..')     
+   
+    else:
+        page_search(
+            rec['track']['title']+' - '+rec['track']['subtitle'],
+            message
+        )
+   
+# @bot.message_handler(func=lambda message: True)
+@bot.message_handler(content_types=['text'])
+def message_handler(message):
+    page_search(message.text, message)
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(query):
+    global DEBUG
+    DEBUG['query'] = query
+    
+    if(is_page_change_query(query)):
+        # bot.answer_callback_query(query.id, "Листаю страницу..")
+        
+        r = PageCallbackData.parse(query.data)
+        
+        logger.info('looking at page %i for %s'
+                                 % (r['page'],r['q']))
+
+        page_search(r['q'], query.message, page=int(r['page']), edit=True)
+    else:
+        ids = query.data
+        
+        chat_id = query.message.chat.id
+        
+        handle_vk_audio_by_ids(chat_id, ids)
+
+# %% Shazam
+
+def shazam_recognize(data):
+    return de_async(shazam_recognize_async, data)
 
 def de_async(fun, *args, **kwargs):
     try:
@@ -70,72 +133,28 @@ def de_async(fun, *args, **kwargs):
             fun(*args, **kwargs)
         )
 
-def shazam_recognize(data_or_path):
-    if type(data_or_path)==bytes:
-        tfile = tempfile.NamedTemporaryFile()
-        tfile.write(data_or_path)
-        data_or_path = tfile.name
-    return de_async(shazam_recognize_async, data_or_path)
+async def shazam_recognize_async(data):
+    shazam = Shazam()
 
+    return await shazam.recognize_song_from_bytes(data)
 
-       
+# for some reason, shazam doesnt have recognize_from_bytes_data
+async def recognize_from_bytes_data(self, data):
+    audio = AudioSegment.from_file(io.BytesIO(data))
+    audio = audio.set_sample_width(2)
+    audio = audio.set_frame_rate(16000)
+    audio = audio.set_channels(1)
 
-# Handles all sent documents and audio files
-@bot.message_handler(content_types=['voice', 'audio'])
-def handle_docs_audio(message):
-    print(message)
-    DEBUG['msgs'].append(message)
-    
-    file_id = (message.voice if message.voice is not None else message.audio).file_id
-    
-    print('getting file..')
-    file = bot.get_file(file_id).wait()
-    
-    print('downloading file..')
-    content = bot.download_file(file.file_path).wait()
-    
-    DEBUG['content'] = content
-    
-    print('recognizing file..')
-    rec = shazam_recognize(content)
-    
-    print(rec)
-    DEBUG['rec'] = rec
-    
-    if len(rec['matches'])==0:
-        print('getting file..')
-        bot.reply_to(message, 'Nothing found, sorry..')     
-   
-    else:
-        page_search(rec['track']['title']+' - '+rec['track']['subtitle'], message)
-        return 
-        keyboard = []
-        # for m in rec['matches']:
-        m=rec
-        if 1:
-            title_str = m['track']['title']+' - '+m['track']['subtitle']
-            print(title_str)
-            keyboard.append(InlineKeyboardButton(
-                   title_str,
-                   callback_data="#"+title_str
-            ))
-        print('simple reply..')
-        bot.reply_to(message, title_str)
-        print('complex reply..')
-        bot.reply_to(
-             message, 
-             "Нашёл:", 
-             reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-    
-   
-   
-# @bot.message_handler(func=lambda message: True)
-@bot.message_handler(content_types=['text'])
-def message_handler(message):
-    page_search(message.text, message)
+    signature_generator = self.create_signature_generator(audio)
+    signature = signature_generator.get_next_signature()
+    while not signature:
+        signature = signature_generator.get_next_signature()
 
+    return await self.send_recognize_request(signature)
+Shazam.recognize_song_from_bytes = recognize_from_bytes_data
 
+# %% Pages
+      
 def page_search(s, message, page=0, edit=False):
     global DEBUG
     DEBUG['message'] = message
@@ -156,8 +175,6 @@ def page_search(s, message, page=0, edit=False):
             bot.reply_to(message, 'Вот что нашёл:', reply_markup=reply_markup)
 
 
-            
-#%%%
 def prepare_keyboard(q, R, page):
     keyboard = [
             [InlineKeyboardButton(
@@ -182,7 +199,6 @@ def prepare_keyboard(q, R, page):
     return InlineKeyboardMarkup(keyboard)
 
 
-
 def edit_message_reply_markup(message, new_reply_markup):
     return bot.edit_message_reply_markup(
         chat_id=message.chat.id, 
@@ -190,15 +206,12 @@ def edit_message_reply_markup(message, new_reply_markup):
         reply_markup=new_reply_markup
     )
 
-# %%
-
 def page_button(q, page, delta_n):
     return InlineKeyboardButton(
         "<" if delta_n < 0 else ">", 
         callback_data=PageCallbackData.gen(q, page + delta_n)
     )
 
-# %%
 
 class PageCallbackData:
     def is_one(s):
@@ -214,9 +227,77 @@ class PageCallbackData:
 def is_page_change_query(query):
     return PageCallbackData.is_one(query.data)
 
+# %% Audios
 
-
-# %%
+def handle_vk_audio_by_ids(chat_id, ids):
+    init_log_msg(chat_id)
+    # bot.answer_callback_query(query.id, "думаю..")
+    
+    r = ep_vk_audio_by_ids(ids)
+    print(r)
+    
+    logger.info('Getting %s : %s' % (ids, r['title_str']))
+    
+    # first_msg = bot.send_audio(chat_id,
+    #                 r['url'],
+    #                 title=r['title'],
+    #                 performer=r['artist'],
+    #             )    
+    try:
+        bot.send_chat_action(chat_id, "record_voice")
+        
+        content = download_audio(r['url'], log_msg)
+    
+        thumb = None
+        if r['track_covers']:
+            thumb = download_cover(r['track_covers'], log_msg)
+        else:
+            thumb = None
+        
+        # bot.answer_callback_query(query.id, "отправляю..")
+        log_msg('отправляю..')
+        
+        # first_msg = first_msg.wait()
+        bot.send_chat_action(chat_id, "upload_document")
+    
+        bot.send_audio(chat_id,
+            content,
+            duration=r['duration'],
+            title=r['title'],
+            performer=r['artist'],
+            thumb=thumb,
+        )
+        
+        # # -- doesnt work =(
+        # bot.edit_message_media(
+        #     InputMediaAudio(
+        #         content,
+        #         duration=r['duration'],
+        #         title=r['title'],
+        #         performer=r['artist'],
+        #         thumb=thumb,
+        #     ),
+        #     chat_id=chat_id,
+        #     message_id=first_msg.id,
+        # )
+    
+        logger.info('Got %s : %s' % (ids, r['title_str']))
+    
+        delete_log_msg()
+    except:
+        log_msg('ошибка')
+        logger.warning(str(r))
+        logger.warning(traceback.format_exc())
+        # send_exc(query.message, traceback.format_exc())
+    
+        try:
+            bot.send_audio(chat_id,
+                    r['url'],
+                    title=r['title'],
+                    performer=r['artist'],
+                )
+        except:
+            traceback.print_exc()
 
 _log_msg = None
 def init_log_msg(chat_id):
@@ -241,96 +322,7 @@ def delete_log_msg():
         bot.delete_message(chat_id=_log_msg.chat.id, message_id=_log_msg.id)
     _log_msg = None
 
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(query):
-    global DEBUG
-    DEBUG['query'] = query
-    
-    if(is_page_change_query(query)):
-        # bot.answer_callback_query(query.id, "Листаю страницу..")
-        
-        r = PageCallbackData.parse(query.data)
-        
-        logger.info('looking at page %i for %s'
-                                 % (r['page'],r['q']))
-
-        page_search(r['q'], query.message, page=int(r['page']), edit=True)
-    elif query.data[0]=='#':
-        page_search(query.data[1:], query.message)
-    else:
-        ids = query.data
-        
-        chat_id = query.message.chat.id
-
-        init_log_msg(chat_id)
-        # bot.answer_callback_query(query.id, "думаю..")
-
-        r = ep_vk_audio_by_ids(ids)
-        print(r)
-
-        logger.info('Getting %s : %s' % (ids, r['title_str']))
-    
-        # first_msg = bot.send_audio(chat_id,
-        #                 r['url'],
-        #                 title=r['title'],
-        #                 performer=r['artist'],
-        #             )    
-        try:
-            bot.send_chat_action(chat_id, "record_voice")
-            
-            content = download_audio(r['url'], log_msg)
-        
-            thumb = None
-            if r['track_covers']:
-                thumb = download_cover(r['track_covers'], log_msg)
-            else:
-                thumb = None
-            
-            # bot.answer_callback_query(query.id, "отправляю..")
-            log_msg('отправляю..')
-            
-            # first_msg = first_msg.wait()
-            bot.send_chat_action(chat_id, "upload_document")
-
-            bot.send_audio(chat_id,
-                content,
-                duration=r['duration'],
-                title=r['title'],
-                performer=r['artist'],
-                thumb=thumb,
-            )
-            
-            # # -- doesnt work =(
-            # bot.edit_message_media(
-            #     InputMediaAudio(
-            #         content,
-            #         duration=r['duration'],
-            #         title=r['title'],
-            #         performer=r['artist'],
-            #         thumb=thumb,
-            #     ),
-            #     chat_id=chat_id,
-            #     message_id=first_msg.id,
-            # )
-
-            logger.info('Got %s : %s' % (ids, r['title_str']))
-
-            delete_log_msg()
-        except:
-            log_msg('ошибка')
-            logger.warning(str(r))
-            logger.warning(traceback.format_exc())
-            # send_exc(query.message, traceback.format_exc())
-
-            try:
-                bot.send_audio(chat_id,
-                        r['url'],
-                        title=r['title'],
-                        performer=r['artist'],
-                    )
-            except:
-                traceback.print_exc()
-#%%% 
+#%%% default listener to log everything to output
 
 def listener(messages):
     for m in messages:
