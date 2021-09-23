@@ -8,7 +8,7 @@ import traceback
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaAudio, InputFile
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler, Filters
 
-from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover
+from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover, renew_connection
 
 from auths import AUTHS
 
@@ -28,13 +28,6 @@ logger = logging.getLogger(__name__)
 global DEBUG
 DEBUG = {}
 
-
-def shuffle_str(s):
-    import random
-    x = [c for c in s]
-    random.shuffle(x)
-    return ''.join(x)
-
 def log(*args):
     logger.info(*args)
 
@@ -50,6 +43,18 @@ def warning(*args):
 
 def start(update: Update, context: CallbackContext) -> None:
     update.message.reply_text('Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти')
+    
+def renew(update: Update, context: CallbackContext) -> None:
+    try:
+        renew_connection()
+        update.message.reply_text('VK connection renewed')
+    except:
+        traceback.print_exc()
+        try:
+            update.message.reply_text('Error..')
+        except:
+            pass
+
 
 MAX_MESSAGE_LEN = 500
 def send_exc(message, s, print_also=True):
@@ -220,6 +225,7 @@ def main():
     updater = Updater(AUTHS[2])
 
     updater.dispatcher.add_handler(CommandHandler('start', start))
+    updater.dispatcher.add_handler(CommandHandler('renew', renew))
     updater.dispatcher.add_handler(MessageHandler(Filters.text, message))
     updater.dispatcher.add_handler(CallbackQueryHandler(button))
     updater.dispatcher.add_handler(CommandHandler('help', help_command))
