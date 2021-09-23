@@ -2,3 +2,6 @@ requests
 BeautifulSoup4
 python-telegram-bot
 vk_api
+pycrypto
+shazamio
+pyTelegramBotAPI
