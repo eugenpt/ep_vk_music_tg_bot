@@ -5,3 +5,6 @@ nssm__stdout.txt
 *.bat
 nssm*
 .venv*
+.idea*
+.vs*
+

@@ -10,7 +10,7 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, Callback
 
 from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover
 
-from auths import *
+from auths import AUTHS
 
 socket._GLOBAL_DEFAULT_TIMEOUT = 100
 

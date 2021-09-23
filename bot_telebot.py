@@ -16,10 +16,12 @@ import tempfile
 import traceback
 
 from pydub import AudioSegment
+from time import sleep
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from shazamio import Shazam
 
-from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover
+from common import de_async
+from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover, renew_connection
 from auths import AUTHS
 
 # %%
@@ -56,7 +58,26 @@ def on_start(message):
         )
     )
 
-
+@bot.message_handler(commands=['renew'])
+def on_renew(message):
+    try:
+        renew_connection()
+        bot.send_message(
+            message.chat.id, (
+            'VK conection renewed'
+            )
+        )
+    except:
+        traceback.print_exc()
+        try:
+            bot.send_message(
+                message.chat.id, (
+                'some error..'
+                )
+            )
+        except:
+            pass
+    
 # Handles all sent documents and audio files
 @bot.message_handler(content_types=['voice', 'audio'])
 def handle_docs_audio(message):
@@ -118,20 +139,6 @@ def callback_query(query):
 def shazam_recognize(data):
     return de_async(shazam_recognize_async, data)
 
-def de_async(fun, *args, **kwargs):
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    if loop.is_running():
-        return asyncio.gather(
-            fun(*args, **kwargs)
-        ).result()
-    else:
-        return loop.run_until_complete(
-            fun(*args, **kwargs)
-        )
 
 async def shazam_recognize_async(data):
     shazam = Shazam()
@@ -156,6 +163,7 @@ Shazam.recognize_song_from_bytes = recognize_from_bytes_data
 # %% Pages
       
 def page_search(s, message, page=0, edit=False):
+    bot.send_chat_action("typing")
     global DEBUG
     DEBUG['message'] = message
     logger.info('Looking for ' + s)
@@ -236,6 +244,8 @@ def handle_vk_audio_by_ids(chat_id, ids):
     r = ep_vk_audio_by_ids(ids)
     print(r)
     
+    DEBUG['r'] = r
+    
     logger.info('Getting %s : %s' % (ids, r['title_str']))
     
     # first_msg = bot.send_audio(chat_id,
@@ -260,13 +270,14 @@ def handle_vk_audio_by_ids(chat_id, ids):
         # first_msg = first_msg.wait()
         bot.send_chat_action(chat_id, "upload_document")
     
-        bot.send_audio(chat_id,
+        task = bot.send_audio(chat_id,
             content,
             duration=r['duration'],
             title=r['title'],
             performer=r['artist'],
             thumb=thumb,
         )
+        DEBUG['task'] = task
         
         # # -- doesnt work =(
         # bot.edit_message_media(
@@ -280,7 +291,11 @@ def handle_vk_audio_by_ids(chat_id, ids):
         #     chat_id=chat_id,
         #     message_id=first_msg.id,
         # )
-    
+        
+        while not task.done:
+            bot.send_chat_action(chat_id, "upload_document")
+            sleep(.1)
+        
         logger.info('Got %s : %s' % (ids, r['title_str']))
     
         delete_log_msg()
