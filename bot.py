@@ -137,13 +137,15 @@ def button(update: Update, context: CallbackContext) -> None:
             
             log_fun('отправляю..')
 
-            query.message.reply_audio(
+            msg2 = query.message.reply_audio(
                 content,
                 duration=r['duration'],
                 title=r['title'],
                 performer=r['artist'],
                 thumb=thumb,
                 )
+            
+            DEBUG['reply_audio'] = msg2
             
             info('Got %s : %s' % (ids, r['title_str']))
 
@@ -260,8 +262,16 @@ def main():
     updater.dispatcher.add_handler(CallbackQueryHandler(button))
     updater.dispatcher.add_handler(CommandHandler('help', help_command))
 
+    me = updater.bot.getMe()
+    
+    
+    print(f'I am:\nname:{me.first_name} username:{me.username} id:{me.id}\nSecurity token:\n{AUTHS[2]}')
+    
+
     # Start the Bot
     updater.start_polling()
+
+    
 
     # Run the bot until the user presses Ctrl-C or the process receives SIGINT,
     # SIGTERM or SIGABRT
@@ -271,4 +281,5 @@ def main():
 
 
 if __name__ == '__main__':
+    print('This is ep_vk_music__bot')
     main()

@@ -16,9 +16,10 @@ import tempfile
 import traceback
 
 from time import sleep
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaAudio
 
 from common import de_async
+from persistence import PD
 from vk_funcs import ep_vk_search, ep_vk_audio_by_ids, ep_vk_finish, download_audio, download_cover, renew_connection
 from shazam_funcs import shazam_recognize
 from auths import AUTHS
@@ -42,6 +43,9 @@ class Options:
 
 # bot = telebot.TeleBot(AUTHS[2])
 bot = telebot.AsyncTeleBot(AUTHS[2])
+
+# %%
+
 
 
 # %%
@@ -214,7 +218,11 @@ def handle_vk_audio_by_ids(chat_id, ids):
     init_log_msg(chat_id)
     # bot.answer_callback_query(query.id, "думаю..")
     
-    r = ep_vk_audio_by_ids(ids)
+    if ids in PD.VK_AUDIOS:
+        print('vk info cached')
+        r = PD.VK_AUDIOS[ids]
+    else:
+        r = ep_vk_audio_by_ids(ids)
     print(r)
     
     DEBUG['r'] = r
@@ -227,30 +235,40 @@ def handle_vk_audio_by_ids(chat_id, ids):
     #                 performer=r['artist'],
     #             )    
     try:
-        bot.send_chat_action(chat_id, "record_voice")
-        
-        content = download_audio(r['url'], log_msg)
-    
-        thumb = None
-        if r['track_covers']:
-            thumb = download_cover(r['track_covers'], log_msg)
+        if 'telegram_file_id' in r:
+            print('telegram_file_id info cached')
+            media = r['telegram_file_id']
+            task = bot.send_audio(chat_id, media)
         else:
+            bot.send_chat_action(chat_id, "record_voice")
+            
+            content = download_audio(r['url'], log_msg)
+        
             thumb = None
+            if r['track_covers']:
+                thumb = download_cover(r['track_covers'], log_msg)
+            else:
+                thumb = None
+            
+            
+            task = bot.send_audio(chat_id,
+                content,
+                duration=r['duration'],
+                title=r['title'],
+                performer=r['artist'],
+                thumb=thumb,
+            )
         
         # bot.answer_callback_query(query.id, "отправляю..")
         log_msg('отправляю..')
-        
-        # first_msg = first_msg.wait()
+
         bot.send_chat_action(chat_id, "upload_document")
-    
-        task = bot.send_audio(chat_id,
-            content,
-            duration=r['duration'],
-            title=r['title'],
-            performer=r['artist'],
-            thumb=thumb,
-        )
+        
+        # task = bot.send_media_group(chat_id, [media,media,media])
+
         DEBUG['task'] = task
+        
+        
         
         # # -- doesnt work =(
         # bot.edit_message_media(
@@ -270,6 +288,11 @@ def handle_vk_audio_by_ids(chat_id, ids):
             sleep(.1)
         
         logger.info('Got %s : %s' % (ids, r['title_str']))
+        
+        if 'telegram_file_id' not in r:
+            print('logging new telegram_file_id')
+        r['telegram_file_id'] = task.result.audio.file_id
+        print(r['telegram_file_id'])
     
         delete_log_msg()
     except:
@@ -331,7 +354,13 @@ if __name__=='__main__':
     ))
     
     print('listening..')
-    bot.polling()
+    try:
+        bot.polling()
+    except KeyboardInterrupt:
+        print('Ctrl-C..')
+    finally:
+        PD.save()
+    
     
     pass
 
