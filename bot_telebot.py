@@ -322,6 +322,15 @@ if __name__=='__main__':
     print('This is ep_vk_music_telebot')
     
     bot.set_update_listener(listener)
+    
+    me = bot.get_me().wait()
+    
+    print('I am:\n%s\nSecurity token:\n%s' % (
+        {s:me.__dict__[s] for s in ['id', 'first_name', 'username']}
+        ,AUTHS[2]
+    ))
+    
+    print('listening..')
     bot.polling()
     
     pass
