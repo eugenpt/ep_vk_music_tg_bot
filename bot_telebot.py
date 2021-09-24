@@ -2,6 +2,8 @@
 """
 Created on %(date)s
 
+TODO: proper url-en/de-code
+
 @author: %(username)s
 """
 
@@ -44,11 +46,60 @@ class Options:
 # bot = telebot.TeleBot(AUTHS[2])
 bot = telebot.AsyncTeleBot(AUTHS[2])
 
+CHAT_STATES = {}
+def get_chat_state(chat_id):
+    if chat_id not in CHAT_STATES:
+        CHAT_STATES[chat_id] = None
+    return CHAT_STATES[chat_id]
+
+def set_chat_state(chat_id, state):
+    CHAT_STATES[chat_id] = state
+    
+
 # %%
 
+def btn(text, callback_data=None):
+    return InlineKeyboardButton(text, callback_data=callback_data)
 
+def markup(btns, callback_data=None):
+    if type(btns)==list:
+        if all(type(btn)==InlineKeyboardButton for btn in btns):
+            return markup([[btn] for btn in btns])
+        else:
+            return InlineKeyboardMarkup(btns)
+    elif type(btns)==str:
+        return markup(btn(btns, callback_data=callback_data))
+    else:
+        return markup([[btns]])
 
 # %%
+
+def parse_url_pars(s):
+    r = {}
+    for ts in s.split('&'):
+        if len(ts)>3:
+            a = ts.split('=')
+            r[a[0]]=a[1]
+    return r
+
+def bot_run_command(src_message, command=None):
+    # there's probably a function that does that correctly
+    #  already in bot or in telebot.utils somewhere, but..
+    com_name = command or src_message.text
+    if com_name[0]=='/':
+        com_name = com_name[1:]
+    if com_name.find('?')>0:
+        # Am I reinventing the internet with this?
+        kwargs = parse_url_pars(com_name[com_name.find('?')+1:])
+        com_name = com_name[:com_name.find('?')]
+    else:
+        kwargs = {}
+    print('\nbot_run_command:\ncon_name=%s\nkwargs=%s\n..' % (com_name, str(kwargs)))
+    for handler in bot.message_handlers:
+        if 'commands' in handler['filters']\
+            and com_name in  handler['filters']['commands']:
+            print('running sth')
+            return handler['function'](src_message, **kwargs)        
 
 @bot.message_handler(commands=['start'])
 def on_start(message):
@@ -58,25 +109,153 @@ def on_start(message):
         ' или записывай аудио-сообщение, распознаю'
         '\n\n'
         'Hi! send text to search audios or record to recognize'
-        '\n\n'
-        '/all to get all medias in one message'
-        '\n\n'
-        
-        )
+        ),
+        reply_markup=home_reply_markup(message.chat.id)
     )
+    
+
+@bot.message_handler(commands=['albums'])
+def albums_fun(message):
+    albums = PD.get_chat_albums(message.chat.id)
+    print('\n\n%s\n\n' % list(albums.keys()))
+    if len(albums)==0:
+        bot.send_message(
+            message.chat.id, 
+            'no albums yet',
+            reply_markup=markup('new album', callback_data='/new_album')
+        )
+    else:
+        bot.send_message(
+            message.chat.id, 
+            'Albums:',
+            reply_markup=markup([btn(album_name + '(%i)' % len(albums[album_name]), callback_data='/album?album_name='+album_name)
+                for album_name in albums
+            ] + [
+                btn('new album', callback_data='/new_album')
+            ])
+        )
+
+@bot.message_handler(commands=['album'])
+def album_fun(message, album_name=None):
+    print('album_fun')
+    if album_name is None:
+        return albums_fun(message)
+    print(' album_name='+album_name)
+    
+    album = PD.get_album_or_add(message.chat.id, album_name)
+    print(album)
+    if len(album)==0:
+        return home_fun(message, text='album is empty')
+    else:
+        bot.send_media_group(
+            message.chat.id,
+            [InputMediaAudio(file_id) for file_id in album],
+            # reply_markup=home_reply_markup(message.chat.id)
+        ).wait()
+        
+        home_fun(message, text='^ ^')
+        
+
+def home_reply_markup(chat_id):
+    return markup([btn('new album', callback_data='/new_album')
+            if not PD.have_albums(chat_id)
+            else btn('albums', callback_data='/albums')
+            , btn( 'renew vk conn..', callback_data='/renew')
+        ])
+
+@bot.message_handler(commands=['go_home'])
+def home_fun(message, text=None):
+    if text is None:
+        text = 'Send text to search for music, send voice to recognize' 
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=home_reply_markup(message.chat.id)
+    )
+
+@bot.message_handler(commands=['add_ids_to_album_init'])
+def add_ids_to_album_init_fun(message, ids=None):
+    print('add_ids_to_album_init_fun ids=%s' % ids)
+    albums = PD.get_chat_albums(message.chat.id)
+    print('\n\n%s\n\n' % list(albums.keys()))
+    if len(albums)==0:
+        bot.send_message(
+            message.chat.id, 
+            'no albums yet',
+            reply_markup=home_reply_markup(message.chat.id)
+        )
+    # elif len(albums)==1:
+    #     # We know what we're doing!
+    #     add_ids_to_album_for_fun(message, ids=ids, album_name=list(albums.keys())[0])
+    else:
+        bot.send_message(
+            message.chat.id, 
+            'Add where?',
+            reply_markup=markup([btn(album_name + '(%i)' % len(albums[album_name]), callback_data='/add_ids_to_album?ids='+ids+'&album_name='+album_name)
+                for album_name in albums
+            ] + [
+                btn('new album', callback_data='/new_album')
+            ])
+        )
+    pass
+
+@bot.message_handler(commands=['add_ids_to_album'])
+def add_ids_to_album_for_fun(message, ids=None, album_name=None):
+    file_id = PD.get_ids_file_id(ids)
+    
+    album = PD.get_album_or_add(message.chat.id, album_name)
+    if file_id not in album:
+        album.append(file_id)
+    
+    album_fun(message, album_name=album_name)
+    
+            
+class CONSTS:
+    NEW_ALBUM = 'new album'
+    ADD_TO_NEW_ALBUM = 'add to new album'
+
+@bot.message_handler(commands=['new_album'])
+def new_album_fun(message):
+    msg = bot.reply_to(
+        message,
+        'Enter new album name:',
+        reply_markup=markup('Cancel', callback_data='/go_home')
+    ).wait()
+    set_chat_state(message.chat.id, CONSTS.NEW_ALBUM)
+
+def new_album_name_fun(message):
+    new_name = message.text
+    print('\n\n new album name: %s' % new_name)
+    if PD.have_album(message.chat.id, new_name):
+        msg = bot.reply_to(
+            message,
+            'Taken. Enter new album name:',
+            reply_markup=markup('Cancel', callback_data='/go_home')
+        ).wait()
+        set_chat_state(message.chat.id, CONSTS.NEW_ALBUM)
+    else:
+        PD.get_album_or_add(message.chat.id, new_name)
+        msg = bot.reply_to(
+            message,
+            'Album *%s* created' % new_name,
+            reply_markup=home_reply_markup(message.chat.id)
+        )
+        set_chat_state(message.chat.id, None)
 
 @bot.message_handler(commands=['all'])
 def send_all(message):
-    
     group = []
     for k in PD.VK_AUDIOS :
-        if 'telegram' in PD.VK_AUDIOS[k] and message.chat.id in PD.VK_AUDIOS[k].chat_ids:
+        if 'telegram' in PD.VK_AUDIOS[k]\
+            and 'chat_ids' in PD.VK_AUDIOS[k]\
+            and message.chat.id in PD.VK_AUDIOS[k]['chat_ids']:
             print(PD.VK_AUDIOS[k])
             group.append(InputMediaAudio(
                 PD.VK_AUDIOS[k]['telegram']['file_id']
             ))      
         else:
             print('..no telegram data..')
+    
     if len(group)>0:
         DEBUG['send_all_task'] = bot.send_media_group(message.chat.id, group)
     else:
@@ -138,15 +317,23 @@ def handle_docs_audio(message):
 # @bot.message_handler(func=lambda message: True)
 @bot.message_handler(content_types=['text'])
 def message_handler(message):
-    page_search(message.text, message)
+    if message.text[0]=='/':
+        bot_run_command(message, message.text)
+    if get_chat_state(message.chat.id) == CONSTS.NEW_ALBUM:
+        # register_next_step_handler is weird
+        new_album_name_fun(message)
+    else:
+        set_chat_state(message.chat.id, None)
+        page_search(message.text, message)
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(query):
+    set_chat_state(query.message.chat.id, None)
     global DEBUG
     DEBUG['query'] = query
     
-    print('')
+    print(' \nQUERY:\n')
     print(query)
     print('')
     
@@ -159,6 +346,8 @@ def callback_query(query):
                                  % (r['page'],r['q']))
 
         page_search(r['q'], query.message, page=int(r['page']), edit=True)
+    elif(query.data[0]=='/'):
+        return bot_run_command(query.message, query.data)
     else:
         ids = query.data
         
@@ -169,7 +358,7 @@ def callback_query(query):
 # %% Pages
       
 def page_search(s, message, page=0, edit=False):
-    bot.send_chat_action("typing")
+    bot.send_chat_action(message.chat.id, "typing")
     global DEBUG
     DEBUG['message'] = message
     logger.info('Looking for ' + s)
@@ -179,6 +368,7 @@ def page_search(s, message, page=0, edit=False):
     
     if len(R)==0:
         logger.info('nothing..')
+        bot.send_chat_action(message.chat.id)
         bot.reply_to(message, 'Ничего не нашлось..')
     else:
         reply_markup = prepare_keyboard(s, R, page)
@@ -191,7 +381,7 @@ def page_search(s, message, page=0, edit=False):
 
 def prepare_keyboard(q, R, page):
     keyboard = [
-            [InlineKeyboardButton(
+            [btn(
                 r['title_str'],
                 callback_data=r['callback_data']
             )]
@@ -210,7 +400,9 @@ def prepare_keyboard(q, R, page):
     if len(page_btns)>0:
         keyboard.append(page_btns)
     
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([btn('Home', callback_data='/go_home')])
+    
+    return markup(keyboard)
 
 
 def edit_message_reply_markup(message, new_reply_markup):
@@ -221,7 +413,7 @@ def edit_message_reply_markup(message, new_reply_markup):
     )
 
 def page_button(q, page, delta_n):
-    return InlineKeyboardButton(
+    return btn(
         "<" if delta_n < 0 else ">", 
         callback_data=PageCallbackData.gen(q, page + delta_n)
     )
@@ -250,8 +442,8 @@ def handle_vk_audio_by_ids(chat_id, ids):
     if ids in PD.VK_AUDIOS:
         print('vk info cached')
         r = PD.VK_AUDIOS[ids]
-        if chat_id not in r:
-            r.append(chat_id)
+        if chat_id not in r['chat_ids']:
+            r['chat_ids'].append(chat_id)
     else:
         r = ep_vk_audio_by_ids(ids)
         
@@ -269,10 +461,16 @@ def handle_vk_audio_by_ids(chat_id, ids):
     #                 performer=r['artist'],
     #             )    
     try:
+        reply_markup = markup((
+        [
+            btn('Add to album','/add_ids_to_album_init?ids='+ids)
+        ] if PD.have_albums(chat_id) else []) +[
+            btn('Home','/go_home')
+        ])
         if 'telegram' in r:
             print('telegram info cached')
             media = r['telegram']['file_id']
-            task = bot.send_audio(chat_id, media)
+            task = bot.send_audio(chat_id, media, reply_markup=reply_markup)
         else:
             bot.send_chat_action(chat_id, "record_voice")
             
@@ -284,13 +482,13 @@ def handle_vk_audio_by_ids(chat_id, ids):
             else:
                 thumb = None
             
-            
             task = bot.send_audio(chat_id,
                 content,
                 duration=r['duration'],
                 title=r['title'],
                 performer=r['artist'],
                 thumb=thumb,
+                reply_markup=reply_markup,
             )
         
         # bot.answer_callback_query(query.id, "отправляю..")
@@ -378,9 +576,7 @@ def listener(messages):
 
 #%%% 
 
-if __name__=='__main__':
-    print('This is ep_vk_music_telebot')
-    
+def main():
     bot.set_update_listener(listener)
     
     me = bot.get_me().wait()
@@ -390,16 +586,7 @@ if __name__=='__main__':
         ,AUTHS[2]
     ))
         
-    
-    # Enable saving next step handlers to file "./.handlers-saves/step.save".
-    # Delay=2 means that after any change in next step handlers (e.g. calling register_next_step_handler())
-    # saving will hapen after delay 2 seconds.
-    bot.enable_save_next_step_handlers(delay=2)
-    
-    # Load next_step_handlers from save file (default "./.handlers-saves/step.save")
-    # WARNING It will work only if enable_save_next_step_handlers was called!
-    bot.load_next_step_handlers()
-    
+        
     print('listening..')
     try:
         bot.polling()
@@ -412,3 +599,9 @@ if __name__=='__main__':
     pass
 
 #%%% 
+
+if __name__=='__main__':
+    print('This is ep_vk_music_telebot')
+ 
+    main()
+

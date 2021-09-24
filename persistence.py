@@ -16,6 +16,7 @@ import pickle
 #%%% 
 
 class PersistentData:
+    USER_DATA = {}
     USER_PLAYLISTS = {} # per user
     VK_AUDIOS = {} # including telegram file_ids (!)
     
@@ -53,6 +54,33 @@ class PersistentData:
 
     def get_path(self):
         return '__STORAGE.pickle'
+    
+    def get_chat_albums(self, chat_id):
+        if chat_id not in self.USER_PLAYLISTS:
+            self.USER_PLAYLISTS[chat_id] = {}
+        return self.USER_PLAYLISTS[chat_id]
+        
+    def have_ids(self, ids):
+        return ids in self.VK_AUDIOS
+    
+    def get_ids_file_id(self, ids):
+        return self.VK_AUDIOS[ids]['telegram']['file_id']
+    
+    def get_album_or_add(self, chat_id, album_name):
+        albums = self.get_chat_albums(chat_id)
+        if album_name not in albums:
+            albums[album_name] = []
+        return albums[album_name]
+        
+    def have_albums(self, chat_id):
+        return len(self.get_chat_albums(chat_id))>0
+    
+    def have_album(self, chat_id, album_name):
+        return album_name in self.get_chat_albums(chat_id)
+    
+    def add_to_album(self, chat_id, album_name, file_id):
+        self.get_album_or_add(chat_id, album_name).append(file_id)
+
     
 PD = PersistentData()
 

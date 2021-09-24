@@ -52,7 +52,7 @@ def info(*args):
     logger.info(*args)
 
 vk_audio_id_sep = '|'
-vk_audio_id_sep = '='
+vk_audio_id_sep = ':'
 def vk_audio_id_encode(a,b):
     return str(a) + vk_audio_id_sep + str(b)
 
