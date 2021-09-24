@@ -16,7 +16,7 @@ import tempfile
 import traceback
 
 from time import sleep
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaAudio
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaAudio, Audio
 
 from common import de_async
 from persistence import PD
@@ -54,13 +54,38 @@ bot = telebot.AsyncTeleBot(AUTHS[2])
 def on_start(message):
     bot.send_message(
         message.chat.id, (
-        'Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти'
+        'Здравствуй! Ищу и качаю музыку с вконтакте, пиши что надо найти\n'
         ' или записывай аудио-сообщение, распознаю'
-        '\n'
+        '\n\n'
         'Hi! send text to search audios or record to recognize'
+        '\n\n'
+        '/all to get all medias in one message'
+        '\n\n'
+        
         )
     )
 
+@bot.message_handler(commands=['all'])
+def send_all(message):
+    
+    group = []
+    for k in PD.VK_AUDIOS :
+        if 'telegram' in PD.VK_AUDIOS[k] and message.chat.id in PD.VK_AUDIOS[k].chat_ids:
+            print(PD.VK_AUDIOS[k])
+            group.append(InputMediaAudio(
+                PD.VK_AUDIOS[k]['telegram']['file_id']
+            ))      
+        else:
+            print('..no telegram data..')
+    if len(group)>0:
+        DEBUG['send_all_task'] = bot.send_media_group(message.chat.id, group)
+    else:
+        bot.send_message(
+            message.chat.id, (
+            'no audios yet'
+            )
+        )        
+    
 @bot.message_handler(commands=['renew'])
 def on_renew(message):
     try:
@@ -120,6 +145,10 @@ def message_handler(message):
 def callback_query(query):
     global DEBUG
     DEBUG['query'] = query
+    
+    print('')
+    print(query)
+    print('')
     
     if(is_page_change_query(query)):
         # bot.answer_callback_query(query.id, "Листаю страницу..")
@@ -221,8 +250,13 @@ def handle_vk_audio_by_ids(chat_id, ids):
     if ids in PD.VK_AUDIOS:
         print('vk info cached')
         r = PD.VK_AUDIOS[ids]
+        if chat_id not in r:
+            r.append(chat_id)
     else:
         r = ep_vk_audio_by_ids(ids)
+        
+        r['chat_ids'] = [chat_id]
+        PD.VK_AUDIOS[ids] = r
     print(r)
     
     DEBUG['r'] = r
@@ -235,9 +269,9 @@ def handle_vk_audio_by_ids(chat_id, ids):
     #                 performer=r['artist'],
     #             )    
     try:
-        if 'telegram_file_id' in r:
-            print('telegram_file_id info cached')
-            media = r['telegram_file_id']
+        if 'telegram' in r:
+            print('telegram info cached')
+            media = r['telegram']['file_id']
             task = bot.send_audio(chat_id, media)
         else:
             bot.send_chat_action(chat_id, "record_voice")
@@ -291,8 +325,11 @@ def handle_vk_audio_by_ids(chat_id, ids):
         
         if 'telegram_file_id' not in r:
             print('logging new telegram_file_id')
-        r['telegram_file_id'] = task.result.audio.file_id
-        print(r['telegram_file_id'])
+        r['telegram'] = {
+            'file_id': task.result.audio.file_id,
+            'file_unique_id': task.result.audio.file_unique_id,
+        }
+        print(r['telegram']['file_id'])
     
         delete_log_msg()
     except:
@@ -352,6 +389,16 @@ if __name__=='__main__':
         {s:me.__dict__[s] for s in ['id', 'first_name', 'username']}
         ,AUTHS[2]
     ))
+        
+    
+    # Enable saving next step handlers to file "./.handlers-saves/step.save".
+    # Delay=2 means that after any change in next step handlers (e.g. calling register_next_step_handler())
+    # saving will hapen after delay 2 seconds.
+    bot.enable_save_next_step_handlers(delay=2)
+    
+    # Load next_step_handlers from save file (default "./.handlers-saves/step.save")
+    # WARNING It will work only if enable_save_next_step_handlers was called!
+    bot.load_next_step_handlers()
     
     print('listening..')
     try:

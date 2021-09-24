@@ -7,4 +7,6 @@ nssm*
 .venv*
 .idea*
 .vs*
+*.pickle
+.*
 
