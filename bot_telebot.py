@@ -16,6 +16,7 @@ import logging
 import telebot
 import tempfile
 import traceback
+import urllib.parse
 
 from time import sleep
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaAudio, Audio
@@ -43,6 +44,8 @@ class Options:
 
 # %%
 
+callback_data_dict = {}
+
 # bot = telebot.TeleBot(AUTHS[2])
 bot = telebot.AsyncTeleBot(AUTHS[2])
 
@@ -56,9 +59,23 @@ def set_chat_state(chat_id, state):
     CHAT_STATES[chat_id] = state
     
 
+J = 0
 # %%
+def new_callback_id():
+    global J
+    while(1):
+        J = J+1
+        if str(J) not in callback_data_dict:
+          return J
+        
+def save_callback_data(data):
+    id = str(new_callback_id())
+    callback_data_dict[id] = data
+    return id
 
 def btn(text, callback_data=None):
+    if type(callback_data)==list:
+        callback_data = '/'+callback_data[0]+'?'+str(save_callback_data(callback_data[1]))
     return InlineKeyboardButton(text, callback_data=callback_data)
 
 def markup(btns, callback_data=None):
@@ -74,7 +91,19 @@ def markup(btns, callback_data=None):
 
 # %%
 
+def encode_callback_data(com_name, data_dict=None):
+    if com_name[0]=='/':
+        r = com_name[1:]
+    else:
+        r = com_name
+    if data_dict is not None:
+        return '/'+r+'?'+save_callback_data(data_dict)
+    else:
+        return '/'+r
+
 def parse_url_pars(s):
+    parsed = urllib.parse.parse_qs(s)
+    return {k:parsed[k][0] for k in parsed}
     r = {}
     for ts in s.split('&'):
         if len(ts)>3:
@@ -90,7 +119,7 @@ def bot_run_command(src_message, command=None):
         com_name = com_name[1:]
     if com_name.find('?')>0:
         # Am I reinventing the internet with this?
-        kwargs = parse_url_pars(com_name[com_name.find('?')+1:])
+        kwargs = callback_data_dict.get(com_name[com_name.find('?')+1:], {})
         com_name = com_name[:com_name.find('?')]
     else:
         kwargs = {}
@@ -128,7 +157,7 @@ def albums_fun(message):
         bot.send_message(
             message.chat.id, 
             'Albums:',
-            reply_markup=markup([btn(album_name + '(%i)' % len(albums[album_name]), callback_data='/album?album_name='+album_name)
+            reply_markup=markup([btn(album_name + '(%i)' % len(albums[album_name]), callback_data=['album',{'album_name':album_name}])
                 for album_name in albums
             ] + [
                 btn('new album', callback_data='/new_album')
@@ -174,7 +203,9 @@ def home_fun(message, text=None):
     )
 
 @bot.message_handler(commands=['add_ids_to_album_init'])
-def add_ids_to_album_init_fun(message, ids=None):
+def add_ids_to_album_init_fun(message, ids=None, album_name=None):
+    if ids is None:
+        return home_fun(message, text='error..')
     print('add_ids_to_album_init_fun ids=%s' % ids)
     albums = PD.get_chat_albums(message.chat.id)
     print('\n\n%s\n\n' % list(albums.keys()))
@@ -188,10 +219,23 @@ def add_ids_to_album_init_fun(message, ids=None):
     #     # We know what we're doing!
     #     add_ids_to_album_for_fun(message, ids=ids, album_name=list(albums.keys())[0])
     else:
-        bot.send_message(
+        print([album_name + ('(%i)' % len(albums[album_name]))
+                for album_name in albums])
+        print(['/add_ids_to_album?ids='+ids+'&album_name='+album_name
+                for album_name in albums])
+        DEBUG['markup'] = markup([
+                btn(album_name + ('(%i)' % len(albums[album_name]))
+                    ,callback_data=encode_callback_data('/add_ids_to_album',{'ids':ids, 'album_name':album_name}))
+                for album_name in albums
+            ] + [
+                btn('new album', callback_data='/new_album')
+            ])
+        DEBUG['task'] = bot.send_message(
             message.chat.id, 
             'Add where?',
-            reply_markup=markup([btn(album_name + '(%i)' % len(albums[album_name]), callback_data='/add_ids_to_album?ids='+ids+'&album_name='+album_name)
+            reply_markup=markup([
+                btn(album_name + ('(%i)' % len(albums[album_name]))
+                    ,callback_data=encode_callback_data('/add_ids_to_album',{'ids':ids, 'album_name':album_name}))
                 for album_name in albums
             ] + [
                 btn('new album', callback_data='/new_album')
@@ -201,12 +245,16 @@ def add_ids_to_album_init_fun(message, ids=None):
 
 @bot.message_handler(commands=['add_ids_to_album'])
 def add_ids_to_album_for_fun(message, ids=None, album_name=None):
+    if album_name is None or ids is None:
+        home_fun(message, text='some error..')
     file_id = PD.get_ids_file_id(ids)
     
     album = PD.get_album_or_add(message.chat.id, album_name)
     if file_id not in album:
         album.append(file_id)
-    
+        print('added to %s , now there are %i' % (album_name, len(album)))
+    else:
+        print('already there')
     album_fun(message, album_name=album_name)
     
             
@@ -463,7 +511,7 @@ def handle_vk_audio_by_ids(chat_id, ids):
     try:
         reply_markup = markup((
         [
-            btn('Add to album','/add_ids_to_album_init?ids='+ids)
+            btn('Add to album',['add_ids_to_album_init',{'ids':ids}])
         ] if PD.have_albums(chat_id) else []) +[
             btn('Home','/go_home')
         ])
