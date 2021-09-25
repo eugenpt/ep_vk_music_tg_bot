@@ -57,7 +57,7 @@ class PersistentData:
     
     def get_chat_albums(self, chat_id):
         if chat_id not in self.USER_PLAYLISTS:
-            self.USER_PLAYLISTS[chat_id] = {}
+            self.USER_PLAYLISTS[chat_id] = {'Первый альбом':[]}
         return self.USER_PLAYLISTS[chat_id]
         
     def have_ids(self, ids):
@@ -77,6 +77,11 @@ class PersistentData:
     
     def have_album(self, chat_id, album_name):
         return album_name in self.get_chat_albums(chat_id)
+    
+    def delete_chat_album(self, chat_id, album_name):
+        albums = self.get_chat_albums(chat_id)
+        if album_name in albums:
+            del albums[album_name]
     
     def add_to_album(self, chat_id, album_name, file_id):
         self.get_album_or_add(chat_id, album_name).append(file_id)

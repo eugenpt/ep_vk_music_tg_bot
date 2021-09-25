@@ -182,24 +182,34 @@ def album_fun(message, album_name=None):
             # reply_markup=home_reply_markup(message.chat.id)
         ).wait()
         
-        home_fun(message, text='^ ^')
+        home_fun(message, text='^ ^', add_btns=[btn('Delete album', callback_data=['delete_album',{'album_name':album_name}])])
+        
+@bot.message_handler(commands=['delete_album'])
+def delete_album_fun(message, album_name=None):
+    if album_name is None:
+        return home_fun(message, text='error..')
+    PD.delete_chat_album(message.chat.id, album_name)
+    home_fun(message, text='album %s deleted' % album_name)
         
 
-def home_reply_markup(chat_id):
-    return markup([btn('new album', callback_data='/new_album')
+def home_reply_markup(chat_id, add_btns=None):
+    if add_btns is None:
+        add_btns = []
+    return markup(add_btns + [
+            btn('new album', callback_data='/new_album')
             if not PD.have_albums(chat_id)
             else btn('albums', callback_data='/albums')
             , btn( 'renew vk conn..', callback_data='/renew')
         ])
 
 @bot.message_handler(commands=['go_home'])
-def home_fun(message, text=None):
+def home_fun(message, text=None, add_btns=None):
     if text is None:
         text = 'Send text to search for music, send voice to recognize' 
     bot.send_message(
         message.chat.id,
         text,
-        reply_markup=home_reply_markup(message.chat.id)
+        reply_markup=home_reply_markup(message.chat.id, add_btns=add_btns)
     )
 
 @bot.message_handler(commands=['add_ids_to_album_init'])
