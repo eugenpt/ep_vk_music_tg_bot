@@ -5,8 +5,10 @@ nssm__stdout.txt
 *.bat
 nssm*
 .venv*
+venv*
 .idea*
 .vs*
 *.pickle
 .*
+*.log
 

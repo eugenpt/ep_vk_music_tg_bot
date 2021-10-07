@@ -180,7 +180,7 @@ def prepare_keyboard(q, R, page):
     keyboard = [
             [InlineKeyboardButton(
                 r['title_str'],
-                callback_data=r['callback_data']
+                callback_data=r['ids_string']
             )]
             for j,r in enumerate(R)
         ]

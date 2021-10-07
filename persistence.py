@@ -84,7 +84,9 @@ class PersistentData:
             del albums[album_name]
     
     def add_to_album(self, chat_id, album_name, file_id):
-        self.get_album_or_add(chat_id, album_name).append(file_id)
+        album = self.get_album_or_add(chat_id, album_name)
+        if file_id not in album:
+            album.append(file_id)
 
     
 PD = PersistentData()

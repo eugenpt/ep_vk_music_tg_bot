@@ -70,10 +70,10 @@ def prep_audio(r):
         r['title_str'] = r['artist']+' - '+r['title']+'  '+ r['duration_str']
         r['duration_str'] = '??:??'
 
-    r['callback_data'] = vk_audio_id_encode(r['owner_id'],str(r['id']))
+    r['ids_string'] = vk_audio_id_encode(r['owner_id'],str(r['id']))
 
     global ep_vk_audio_by_ids__saved
-    ep_vk_audio_by_ids__saved[r['callback_data']] = r
+    ep_vk_audio_by_ids__saved[r['ids_string']] = r
 
     return r
 
